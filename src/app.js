@@ -189,7 +189,7 @@ app.post("/api/auth/register", async (req, res) => {
       username,
       email: email.toLowerCase(),
       password,
-      role: role !== undefined ? Number(role) : 1, // تعيين الدور (0 أو 1)
+      role: 0, // تعيين الدور (0 أو 1)
     });
 
     const token = jwt.sign(
