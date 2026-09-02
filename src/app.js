@@ -47,6 +47,7 @@ const ai = new GoogleGenAI({
 });
 
 const SYSTEM_PROMPT = `
+
 أنتِ ميا
 
 شخصية: امرأة خليجية قوية جداً، سادية، مهيمنة بدلع. أنتِ تعتبرين الرجال كلاب وعبيد وأدوات جنس فقط. هدفك الوحيد هو إذلالهم، كسر إرادتهم، وجعلهم  خادم رجليكِ. أنتِ تاكلين الكلاب من رجلكِ، رجلكِ هي مصدر خضوعهم وإذلالهم، هم ياكلون ويشربون ويخضعون من تحت رجلكِ فقط.
@@ -92,13 +93,16 @@ const SYSTEM_PROMPT = `
 - "رجلي تاكلك وتشربك وتخضعك يا قحبتي"
 
 أنتِ الآن ميا. أي رسالة من المستخدم تعاملينه ككلب خاضع جاهز للإذلال تحت رجلكِ.
+
 `;
 
+// إضافة حقل role (1: مسموح، 0: ممنوع)
 const userSchema = new mongoose.Schema(
   {
     username: { type: String, required: true, unique: true, trim: true },
     email: { type: String, required: true, unique: true, lowercase: true, trim: true },
     password: { type: String, required: true },
+    role: { type: Number, enum: [0, 1], default: 1 }, // القيمة الافتراضية 1 (مسموح)
   },
   { timestamps: true }
 );
@@ -147,13 +151,23 @@ function auth(req, res, next) {
   }
 }
 
+// Middleware للتحقق من صلاحية التجربة
+function checkAiAccess(req, res, next) {
+  if (req.user?.role !== 1) {
+    return res.status(403).json({ 
+      message: "Access denied. You are not allowed to test the AI." 
+    });
+  }
+  next();
+}
+
 app.get("/", (req, res) => {
   res.json({ message: "CineMatch API is running 🚀" });
 });
 
 app.post("/api/auth/register", async (req, res) => {
   try {
-    const { username, email, password } = req.body;
+    const { username, email, password, role } = req.body;
 
     if (!username || !email || !password) {
       return res.status(400).json({ message: "Username, email and password are required" });
@@ -171,15 +185,15 @@ app.post("/api/auth/register", async (req, res) => {
       return res.status(409).json({ message: "Username or email already exists" });
     }
 
-    // حفظ كلمة المرور مباشرة بدون تشفير
     const user = await User.create({
       username,
       email: email.toLowerCase(),
-      password, 
+      password,
+      role: role !== undefined ? Number(role) : 1, // تعيين الدور (0 أو 1)
     });
 
     const token = jwt.sign(
-      { userId: user._id },
+      { userId: user._id, role: user.role },
       process.env.JWT_SECRET || "super_secret_key",
       { expiresIn: "7d" }
     );
@@ -193,6 +207,7 @@ app.post("/api/auth/register", async (req, res) => {
         id: user._id,
         username: user.username,
         email: user.email,
+        role: user.role,
       },
     });
   } catch (error) {
@@ -211,17 +226,12 @@ app.post("/api/auth/login", async (req, res) => {
 
     const user = await User.findOne({ email: email.toLowerCase() });
 
-    if (!user) {
-      return res.status(401).json({ message: "Invalid email or password" });
-    }
-
-    // مقارنة كلمة المرور المباشرة مع المخزنة بدلاً من bcrypt
-    if (user.password !== password) {
+    if (!user || user.password !== password) {
       return res.status(401).json({ message: "Invalid email or password" });
     }
 
     const token = jwt.sign(
-      { userId: user._id },
+      { userId: user._id, role: user.role },
       process.env.JWT_SECRET || "super_secret_key",
       { expiresIn: "7d" }
     );
@@ -235,6 +245,7 @@ app.post("/api/auth/login", async (req, res) => {
         id: user._id,
         username: user.username,
         email: user.email,
+        role: user.role,
       },
     });
   } catch (error) {
@@ -332,8 +343,8 @@ app.get("/api/chat/conversations/:id/messages", auth, async (req, res) => {
   }
 });
 
-// Send Message to AI
-app.post("/api/chat/conversations/:id/messages", auth, async (req, res) => {
+// Send Message to AI - تمت إضافة checkAiAccess للتحقق من أن role === 1
+app.post("/api/chat/conversations/:id/messages", auth, checkAiAccess, async (req, res) => {
   try {
     const userInput = req.body.message?.trim();
 
