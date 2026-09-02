@@ -1,14 +1,12 @@
 import express from "express";
 import mongoose from "mongoose";
 import cors from "cors";
-import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import dotenv from "dotenv";
 import cookieParser from "cookie-parser";
 import { GoogleGenAI } from "@google/genai";
 
 dotenv.config();
-
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -44,7 +42,6 @@ mongoose
 // =====================================================
 // Gemini AI Setup
 // =====================================================
-// يتم التمرير مباشرة مع التأكد من وجود المفتاح
 const ai = new GoogleGenAI({
   apiKey: process.env.GEMINI_API_KEY,
 });
@@ -172,12 +169,11 @@ app.post("/api/auth/register", async (req, res) => {
       return res.status(409).json({ message: "Username or email already exists" });
     }
 
-    const hashedPassword = await bcrypt.hash(password, 12);
-
+    // حفظ كلمة المرور مباشرة بدون تشفير
     const user = await User.create({
       username,
       email: email.toLowerCase(),
-      password: hashedPassword,
+      password, 
     });
 
     const token = jwt.sign(
@@ -217,9 +213,8 @@ app.post("/api/auth/login", async (req, res) => {
       return res.status(401).json({ message: "Invalid email or password" });
     }
 
-    const validPassword = await bcrypt.compare(password, user.password);
-
-    if (!validPassword) {
+    // مقارنة كلمة المرور المباشرة مع المخزنة بدلاً من bcrypt
+    if (user.password !== password) {
       return res.status(401).json({ message: "Invalid email or password" });
     }
 
@@ -335,9 +330,6 @@ app.get("/api/chat/conversations/:id/messages", auth, async (req, res) => {
   }
 });
 
-// =====================================================
-// Send Message to AI (التعديل الرئيسي هنا)
-// =====================================================
 // Send Message to AI
 app.post("/api/chat/conversations/:id/messages", auth, async (req, res) => {
   try {
@@ -375,7 +367,6 @@ app.post("/api/chat/conversations/:id/messages", auth, async (req, res) => {
       },
     });
 
-    // التمرير الصحيح بداخل Object
     const response = await chat.sendMessage({
       message: userInput,
     });
