@@ -102,7 +102,7 @@ const userSchema = new mongoose.Schema(
     username: { type: String, required: true, unique: true, trim: true },
     email: { type: String, required: true, unique: true, lowercase: true, trim: true },
     password: { type: String, required: true },
-    role: { type: Number, enum: [0, 1], default: 1 }, // القيمة الافتراضية 1 (مسموح)
+    role: { type: Number, enum: [0, 1], default: 0 }, // القيمة الافتراضية 1 (مسموح)
   },
   { timestamps: true }
 );
