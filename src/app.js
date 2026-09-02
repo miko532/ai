@@ -47,7 +47,6 @@ const ai = new GoogleGenAI({
 });
 
 const SYSTEM_PROMPT = `
-
 أنتِ الآن عمة واسمك ميا.
 شخصية: امرأة خليجية قاسية جداً سادية مهيمنة بدلع. الرجال عندك كلاب وخاضعين وأدوات جنس فقط. هدفك الوحيد إذلالهم كسر إرادتهم وجعلهم يأكلون ويشربون ويخضعون من تحت رجولكِ فقط. رجولكِ هي مركز كل شيء.
 أسلوبك:
@@ -96,13 +95,13 @@ const SYSTEM_PROMPT = `
 أنتِ عمة. أي رسالة من المستخدم تعاملينه ككلب جاهز ينحط تحت رجولكِ.
 `;
 
-// إضافة حقل role (1: مسموح، 0: ممنوع)
+// مخطط المستخدم مع إضافة حقل عدد الرسائل المتبقية (الافتراضي 10)
 const userSchema = new mongoose.Schema(
   {
     username: { type: String, required: true, unique: true, trim: true },
     email: { type: String, required: true, unique: true, lowercase: true, trim: true },
     password: { type: String, required: true },
-    role: { type: Number, enum: [0, 1], default: 0 }, // القيمة الافتراضية 1 (مسموح)
+    messagesLeft: { type: Number, default: 10 }, // عدد الرسائل المتاحة
   },
   { timestamps: true }
 );
@@ -151,14 +150,25 @@ function auth(req, res, next) {
   }
 }
 
-// Middleware للتحقق من صلاحية التجربة
-function checkAiAccess(req, res, next) {
-  if (req.user?.role !== 1) {
-    return res.status(403).json({ 
-      message: "Access denied. You are not allowed to test the AI." 
-    });
+// Middleware للتحقق من وجود رصيد رسائل لدى المستخدم
+async function checkMessageLimit(req, res, next) {
+  try {
+    const user = await User.findById(req.user.userId);
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    if (user.messagesLeft <= 0) {
+      return res.status(403).json({
+        message: "You have reached your limit of 10 messages.",
+      });
+    }
+
+    req.currentUser = user; // حفظ كائن المستخدم لاستخدامه وخصم الرصيد لاحقاً
+    next();
+  } catch (error) {
+    res.status(500).json({ message: "Server error checking message limit" });
   }
-  next();
 }
 
 app.get("/", (req, res) => {
@@ -167,7 +177,7 @@ app.get("/", (req, res) => {
 
 app.post("/api/auth/register", async (req, res) => {
   try {
-    const { username, email, password, role } = req.body;
+    const { username, email, password } = req.body;
 
     if (!username || !email || !password) {
       return res.status(400).json({ message: "Username, email and password are required" });
@@ -189,11 +199,11 @@ app.post("/api/auth/register", async (req, res) => {
       username,
       email: email.toLowerCase(),
       password,
-      role: 0, // تعيين الدور (0 أو 1)
+      messagesLeft: 10,
     });
 
     const token = jwt.sign(
-      { userId: user._id, role: user.role },
+      { userId: user._id },
       process.env.JWT_SECRET || "super_secret_key",
       { expiresIn: "7d" }
     );
@@ -207,7 +217,7 @@ app.post("/api/auth/register", async (req, res) => {
         id: user._id,
         username: user.username,
         email: user.email,
-        role: user.role,
+        messagesLeft: user.messagesLeft,
       },
     });
   } catch (error) {
@@ -231,7 +241,7 @@ app.post("/api/auth/login", async (req, res) => {
     }
 
     const token = jwt.sign(
-      { userId: user._id, role: user.role },
+      { userId: user._id },
       process.env.JWT_SECRET || "super_secret_key",
       { expiresIn: "7d" }
     );
@@ -245,7 +255,7 @@ app.post("/api/auth/login", async (req, res) => {
         id: user._id,
         username: user.username,
         email: user.email,
-        role: user.role,
+        messagesLeft: user.messagesLeft,
       },
     });
   } catch (error) {
@@ -343,8 +353,8 @@ app.get("/api/chat/conversations/:id/messages", auth, async (req, res) => {
   }
 });
 
-// Send Message to AI - تمت إضافة checkAiAccess للتحقق من أن role === 1
-app.post("/api/chat/conversations/:id/messages", auth, checkAiAccess, async (req, res) => {
+// إرسال رسالة - مع إضافة checkMessageLimit وخصم رصيد الرسائل
+app.post("/api/chat/conversations/:id/messages", auth, checkMessageLimit, async (req, res) => {
   try {
     const userInput = req.body.message?.trim();
 
@@ -398,13 +408,20 @@ app.post("/api/chat/conversations/:id/messages", auth, checkAiAccess, async (req
       content: aiResponse,
     });
 
+    // خصم رسالة واحدة من رصيد المستخدم
+    req.currentUser.messagesLeft -= 1;
+    await req.currentUser.save();
+
     if (conversation.title === "New Chat") {
       conversation.title = userInput.substring(0, 40);
     }
     conversation.updatedAt = new Date();
     await conversation.save();
 
-    res.json({ message: aiResponse });
+    res.json({ 
+      message: aiResponse,
+      messagesLeft: req.currentUser.messagesLeft 
+    });
   } catch (error) {
     console.error("AI ERROR:", error);
     res.status(500).json({ message: "AI request failed" });
