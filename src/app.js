@@ -405,7 +405,7 @@ app.post("/api/chat/conversations/:id/messages", auth, checkMessageLimit, async 
     }));
 
     const chat = ai.chats.create({
-      model: "gemini-3.5-flash-lite",
+      model: "gemini-3.1-flash-lite",
       history: history,
       config: {
         systemInstruction: SYSTEM_PROMPT,
